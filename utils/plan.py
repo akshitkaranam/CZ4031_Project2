@@ -21,7 +21,7 @@ class Node(object):
 
     def __init__(self, node_type, relation_name, schema, alias, group_key, sort_key, join_type, index_name,
                  hash_condition, table_filter, index_condition, merge_condition, recheck_condition, join_filter,
-                 subplan_name, actual_rows, actual_time, description,cost,sort_type):
+                 subplan_name, actual_rows, actual_time, description, cost, sort_type):
         self.node_type = node_type.upper()
         self.relation_name = relation_name
         self.schema = schema
@@ -41,11 +41,8 @@ class Node(object):
         self.actual_time = actual_time
         self.description = description
         self.cost = cost
-        self.sort_type =sort_type
+        self.sort_type = sort_type
         self.children = []
-
-
-
 
 
 def get_query_plan(query_number, disable_parameters=(), ):
@@ -63,14 +60,6 @@ def get_query_plan(query_number, disable_parameters=(), ):
         # create a cursor
         cur = conn.cursor()
         query = queries.getQuery(query_number)
-
-        statements = sqlparse.split(query)
-        formatted_query = sqlparse.format(statements[0], reindent=True)
-        print()
-        print(formatted_query)
-        print()
-        split_query = formatted_query.splitlines()
-        # print(split_query)
 
         query = "EXPLAIN (ANALYSE, VERBOSE, FORMAT JSON) " + query
         if query is None:
@@ -90,8 +79,76 @@ def get_query_plan(query_number, disable_parameters=(), ):
         if conn is not None:
             conn.close()
             print('Database connection closed.')
+            print()
 
     return output_json
+
+
+def get_scan(query_number):
+    query = queries.getQuery(query_number)
+
+    # format query
+    statements = sqlparse.split(query)
+    formatted_query = sqlparse.format(statements[0], reindent=True)
+    print()
+    print(formatted_query)
+    print()
+
+    # split query
+    split_query = formatted_query.splitlines()
+    # print(split_query)
+
+    #  get indexes of scans
+    # index = 0
+    # for line in split_query:
+    #     print(index, line)
+    #     index += 1
+
+    from_index = [i for i, line in enumerate(split_query) if 'FROM' in line]
+    from_index = from_index[0]
+    # print("starting index of from:", from_index)
+
+    where_index = [i for i, line in enumerate(split_query) if 'WHERE' in line]
+    where_index = where_index[0]
+    # print("starting index of where:", where_index)
+
+    # get type of scan operation for each index
+    print()
+    operation_list = []
+    for index in range(from_index, where_index):
+        # print(index, split_query[index])
+        for table in split_query[index]:
+            if 'region' in split_query[index]:
+                table = 'region'
+            elif 'nation' in split_query[index]:
+                table = 'nation'
+            elif 'part' in split_query[index]:
+                table = 'part'
+            elif 'supplier' in split_query[index]:
+                table = 'supplier'
+            elif 'partsupp' in split_query[index]:
+                table = 'partsupp'
+            elif 'customer' in split_query[index]:
+                table = 'customer'
+            elif 'orders' in split_query[index]:
+                table = 'orders'
+            elif 'lineitem' in split_query[index]:
+                table = 'lineitem'
+
+        for node in nodeListScans:
+            if table in node.relation_name:
+                query_scan = {"index": index, "operation": node.node_type, "relation": node.relation_name}
+                operation_list.append(query_scan)
+
+        index += 1
+
+    # print()
+    # print(operation_list)
+    return operation_list
+
+
+
+
 
 
 def get_qep_tree(qep_json):
@@ -107,7 +164,7 @@ def get_qep_tree(qep_json):
         parent_node = q_parent_plans.get()
 
         relation_name = schema = alias = group_key = sort_key = join_type = index_name = hash_condition = table_filter \
-            = index_condition = merge_condition = recheck_condition = join_filter = subplan_name = actual_rows = actual_time = description = cost = sort_type=None
+            = index_condition = merge_condition = recheck_condition = join_filter = subplan_name = actual_rows = actual_time = description = cost = sort_type = None
         if 'Relation Name' in current_plan:
             relation_name = current_plan['Relation Name']
         if 'Schema' in current_plan:
@@ -152,7 +209,7 @@ def get_qep_tree(qep_json):
         current_node = Node(current_plan['Node Type'], relation_name, schema, alias, group_key, sort_key, join_type,
                             index_name, hash_condition, table_filter, index_condition, merge_condition,
                             recheck_condition, join_filter,
-                            subplan_name, actual_rows, actual_time, description,cost,sort_type)
+                            subplan_name, actual_rows, actual_time, description, cost, sort_type)
 
         if parent_node is not None:
             parent_node.children.append(current_node)
@@ -169,14 +226,14 @@ def get_qep_tree(qep_json):
     return root_node
 
 
-def traverse_tree(node,depth):
+def traverse_tree(node, depth):
     global nodeListOperations
     global nodeListJoins
     global nodeListScans
     global rawNodeList
 
     for child in node.children:
-        traverse_tree(child,depth+1)
+        traverse_tree(child, depth + 1)
 
     if "SCAN" in str(node.node_type):
         nodeListScans.update({node: depth})
@@ -197,14 +254,14 @@ def get_qep_nodes_with_depth(query_number, disable=()):
     global nodeListScans
     global rawNodeList
     global nodeListJoins
-    qep_json = json.loads(get_query_plan(query_number,disable))
+    qep_json = json.loads(get_query_plan(query_number, disable))
     nodeListOperations.clear()
     nodeListScans.clear()
     root_node = get_qep_tree(qep_json)
-    traverse_tree(root_node,0)
+    traverse_tree(root_node, 0)
 
 
-def get_qep_nodes(query_number,disable=()):
+def get_qep_nodes(query_number, disable=()):
     global nodeListOperations
     global nodeListScans
     global rawNodeList
@@ -213,6 +270,7 @@ def get_qep_nodes(query_number,disable=()):
     nodeListScans = {}
     rawNodeList = []
     nodeListJoins = []
-    get_qep_nodes_with_depth(query_number,disable)
-    sorted_scan = dict(sorted(nodeListScans.items(), key=lambda item: item[1],reverse=True))
+    get_qep_nodes_with_depth(query_number, disable)
+    sorted_scan = dict(sorted(nodeListScans.items(), key=lambda item: item[1], reverse=True))
+    get_scan(query_number)
     return sorted_scan.keys(), nodeListJoins
