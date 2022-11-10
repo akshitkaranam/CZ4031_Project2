@@ -84,12 +84,12 @@ def get_query_plan(query_number, disable_parameters=(), ):
     return output_json
 
 
-def get_scan(query_number):
+def get_operations(query_number):
     query = queries.getQuery(query_number)
 
     # format query
     statements = sqlparse.split(query)
-    formatted_query = sqlparse.format(statements[0], reindent=True)
+    formatted_query = sqlparse.format(statements[0], reindent=True, keyword_case='upper')
     print()
     print(formatted_query)
     print()
@@ -99,56 +99,106 @@ def get_scan(query_number):
     # print(split_query)
 
     #  get indexes of scans
-    # index = 0
-    # for line in split_query:
-    #     print(index, line)
-    #     index += 1
-
-    from_index = [i for i, line in enumerate(split_query) if 'FROM' in line]
-    from_index = from_index[0]
-    # print("starting index of from:", from_index)
-
-    where_index = [i for i, line in enumerate(split_query) if 'WHERE' in line]
-    where_index = where_index[0]
-    # print("starting index of where:", where_index)
-
-    # get type of scan operation for each index
-    print()
-    operation_list = []
-    for index in range(from_index, where_index):
-        # print(index, split_query[index])
-        for table in split_query[index]:
-            if 'region' in split_query[index]:
-                table = 'region'
-            elif 'nation' in split_query[index]:
-                table = 'nation'
-            elif 'part' in split_query[index]:
-                table = 'part'
-            elif 'supplier' in split_query[index]:
-                table = 'supplier'
-            elif 'partsupp' in split_query[index]:
-                table = 'partsupp'
-            elif 'customer' in split_query[index]:
-                table = 'customer'
-            elif 'orders' in split_query[index]:
-                table = 'orders'
-            elif 'lineitem' in split_query[index]:
-                table = 'lineitem'
-
-        for node in nodeListScans:
-            if table in node.relation_name:
-                query_scan = {"index": index, "operation": node.node_type, "relation": node.relation_name}
-                operation_list.append(query_scan)
-
+    index = 0
+    for line in split_query:
+        print(index, line)
         index += 1
 
-    # print()
-    # print(operation_list)
+    from_index = [i for i, line in enumerate(split_query) if 'FROM' in line]
+    # print("list of starting index of from:", from_index)
+
+    where_index = [i for i, line in enumerate(split_query) if 'WHERE' in line]
+    # print("list of starting index of where:", where_index)
+
+    operation_list = []
+    if len(from_index) > 1:
+        count = 0
+        for i in from_index:
+            if count < len(from_index):
+                for index in range(from_index[count], where_index[count]):
+                    query_scan = get_scans(index, split_query[index])
+                    operation_list.append(query_scan)
+                count += 1
+    else:
+        for index in range(from_index[0], where_index[0]):
+            query_scan = get_scans(index, split_query[index])
+            operation_list.append(query_scan)
+
+    # assumes keyword "key" is used for all join operations -- based on queries
+    join_index = [i for i, line in enumerate(split_query) if 'key' in line]
+    # print("list of possible index for join:", join_index)
+
+    # TODO: get type of join operation for each index - needs to be worked on
+    for index in join_index:
+        if ("WHERE" in split_query[index]) or ("AND" in split_query[index]) or ("OR" in split_query[index]):
+            each_word = split_query[index].split(" ")
+            if ("WHERE" in each_word):
+                del each_word[0:1]
+            elif ("AND" in each_word) or ("OR" in split_query[index]):
+                del each_word[0:3]
+
+            for node in nodeListJoins:
+                for z in each_word:
+                    if z in str(node.hash_condition):
+                        hash_join = True
+                    else:
+                        hash_join = False
+                    # print(hash_join, z, node.hash_condition)
+                    if z in str(node.merge_condition):
+                        merge_join = True
+                    else:
+                        merge_join = False
+                    # print(merge_join, z, node.merge_condition)
+                    if z in str(node.join_filter):
+                        nested_loop = True
+                    else:
+                        nested_loop = False
+                    # print(nested_loop, z, node.join_filter)
+                if hash_join:
+                    # print(index, split_query[index], "HASH JOIN")
+                    query_scan = {"index": index, "sql": split_query[index], "operation": "HASH JOIN"}
+                    operation_list.append(query_scan)
+                elif merge_join:
+                    # print(index, split_query[index], "MERGE JOIN")
+                    query_scan = {"index": index, "sql": split_query[index], "operation": "MERGE JOIN"}
+                    operation_list.append(query_scan)
+                elif nested_loop:
+                    # print(index, split_query[index], "NESTED LOOP")
+                    query_scan = {"index": index, "sql": split_query[index], "operation": "NESTED LOOP"}
+                    operation_list.append(query_scan)
+
+    print()
+    for i in operation_list:
+        print(operation_list[operation_list.index(i)])
+
     return operation_list
 
 
+# get type of scan operation for each index
+def get_scans(index, sql):
+    for relation in sql:
+        if 'region' in sql:
+            relation = 'region'
+        elif 'nation' in sql:
+            relation = 'nation'
+        elif 'part' in sql:
+            relation = 'part'
+        elif 'supplier' in sql:
+            relation = 'supplier'
+        elif 'partsupp' in sql:
+            relation = 'partsupp'
+        elif 'customer' in sql:
+            relation = 'customer'
+        elif 'orders' in sql:
+            relation = 'orders'
+        elif 'lineitem' in sql:
+            relation = 'lineitem'
 
-
+    for node in nodeListScans:
+        if relation in node.relation_name:
+            query_scan = {"index": index, "sql": sql, "operation": node.node_type,
+                          "relation": node.relation_name}
+            return query_scan
 
 
 def get_qep_tree(qep_json):
@@ -272,5 +322,5 @@ def get_qep_nodes(query_number, disable=()):
     nodeListJoins = []
     get_qep_nodes_with_depth(query_number, disable)
     sorted_scan = dict(sorted(nodeListScans.items(), key=lambda item: item[1], reverse=True))
-    get_scan(query_number)
+    get_operations(query_number)
     return sorted_scan.keys(), nodeListJoins

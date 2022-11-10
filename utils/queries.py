@@ -29,6 +29,9 @@ def q5():
 def q6():
     return "SELECT sum(l_extendedprice * l_discount) as revenue FROM lineitem WHERE l_shipdate >= date '1994-01-01' AND l_shipdate < date '1994-01-01' + interval '1' year AND l_discount between 0.06 - 0.01 AND 0.06 + 0.01 AND l_quantity < 24;"
 
+def q2():
+    return "SELECT o_orderpriority, count(*) as order_count FROM orders WHERE o_orderdate >= date '1996-03-01' AND exists (SELECT * FROM lineitem WHERE l_orderkey = o_orderkey AND l_commitdate < l_receiptdate) GROUP BY o_orderpriority ORDER BY o_orderpriority LIMIT 1;"
+
 def customeQuery(query):
     return query
 
@@ -49,6 +52,8 @@ def getQuery(query_number,custom=None):
         return q14()
     elif query_number == 19:
         return q19()
+    elif query_number == 2:
+        return q2()
     elif query_number == 999:
         customeQuery(custom)
     else:
