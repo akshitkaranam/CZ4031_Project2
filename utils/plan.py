@@ -1,3 +1,4 @@
+import itertools
 import queue
 import psycopg2
 import json
@@ -11,6 +12,14 @@ rawNodeList = []
 nodeListJoins = []
 depth = 0
 
+PARAMS = {
+    'hashjoin': 'ON',
+    'mergejoin': 'ON',
+    'nestloop': 'ON',
+    'indexscan': 'ON',
+    'bitmapscan': 'ON',
+    'seqscan': 'ON',
+}
 
 class Node(object):
     def __repr__(self):
@@ -262,6 +271,39 @@ def get_operations(query_number):
         print(operation_list[operation_list.index(i)])
 
     return operation_list
+
+def generateAQPs(query_number):
+
+    aqps = []
+    #count is the number of kinds of join
+    count = 6
+    permutations = list(itertools.product(["ON", "OFF"], repeat=count))
+    max = 10
+    cur = 0
+    for p in permutations:
+        cur += 1
+        i = 0
+        alt_params = PARAMS.copy()
+        for key, value in alt_params.items():
+            if value == "ON":
+                alt_params.update({key: p[i]})
+                i += 1
+            if i == count:
+                break
+        disable = []
+
+        for key, value in alt_params.items():
+            if value == "OFF":
+                disable.append(key)
+        new_disable = tuple(disable)
+        temp = json.dumps(get_query_plan(query_number, new_disable))
+        aqp_json = json.loads(temp)
+        if aqp_json:
+            aqps.append(aqp_json)
+            print(aqp_json)
+            if (cur > max):
+                break
+    return aqps
 
 
 # get type of scan operation for each index

@@ -1,4 +1,4 @@
-from utils.plan import get_qep_nodes
+from utils.plan import get_qep_nodes, generateAQPs
 
 if __name__ == '__main__':
 
@@ -23,3 +23,8 @@ if __name__ == '__main__':
             print(node.node_type, node.join_filter)
         else:
             print(node.node_type)
+
+    print()
+    print()
+    print("start generating aqps")
+    aqps = generateAQPs(3)
