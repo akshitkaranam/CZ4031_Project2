@@ -1,6 +1,9 @@
+from utils import queries
 from utils.plan import get_mapping
 import itertools
 import json
+import utils.queries
+import sqlparse
 
 PARAMS = {
     'hashjoin': 'ON',
@@ -13,6 +16,16 @@ PARAMS = {
 
 
 def get_all_plans(query_number, disable_methods=()):
+    query = queries.getQuery(query_number)
+    statements = sqlparse.split(query)
+    formatted_query = sqlparse.format(statements[0], reindent=True, keyword_case='upper')
+    split_query = formatted_query.splitlines()
+    index = 0
+    for line in split_query:
+        print(index, line)
+        index += 1
+
+
     optimal = get_mapping(query_number)
 
     # For the various joins
@@ -91,5 +104,5 @@ def generateAQPs(query_number):
     return aqps
 
 if __name__ == '__main__':
-    mapping = get_all_plans(5)
+    mapping = get_all_plans(14)
 

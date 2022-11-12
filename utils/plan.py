@@ -214,7 +214,7 @@ def get_operations(query_number):
 
     print()
     getJoinMapping(join_conditions_list, join_indexes, split_query, operation_list)
-    return operation_list
+    return operation_list, formatted_query
 
 
 def get_mapping_hashjoin(i, join_conditions_list, join_indexes, split_query, operation_list):
@@ -522,7 +522,7 @@ def get_mapping(query_number, disable=()):
     nodeListJoins = []
     get_qep_nodes_with_depth(query_number, disable)
     sorted_scan = dict(sorted(nodeListScans.items(), key=lambda item: item[1], reverse=True))
-    print(nodeListScans)
+    # print(nodeListScans)
     if rawNodeList:
         operation_list = get_operations(query_number)
         return operation_list
