@@ -3,7 +3,7 @@ from utils.plan import get_qep_nodes, generateAQPs
 if __name__ == '__main__':
 
     disable = tuple(["hashjoin"])
-    list_scan, list_join = get_qep_nodes(3)
+    list_scan, list_join = get_qep_nodes(14)
 
     print()
     for node in list_scan:
