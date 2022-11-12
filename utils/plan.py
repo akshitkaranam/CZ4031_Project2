@@ -22,16 +22,17 @@ PARAMS = {
     'seqscan': 'ON',
 }
 
+
 class Node(object):
     def __repr__(self):
         return f"Node({self.node_type}, {self.relation_name}, {self.schema}, {self.alias}, {self.group_key}, {self.sort_key}, {self.join_type}" \
                f", {self.index_name},{self.hash_condition}, {self.table_filter}, {self.index_condition}, {self.merge_condition}" \
                f", {self.recheck_condition}, {self.join_filter},{self.subplan_name}, {self.actual_rows}, {self.actual_time}" \
-               f", {self.description},{self.cost},{self.sort_type})"
+               f", {self.description},{self.cost},{self.sort_type},{self.output})"
 
     def __init__(self, node_type, relation_name, schema, alias, group_key, sort_key, join_type, index_name,
                  hash_condition, table_filter, index_condition, merge_condition, recheck_condition, join_filter,
-                 subplan_name, actual_rows, actual_time, description, cost, sort_type):
+                 subplan_name, actual_rows, actual_time, description, cost, sort_type, output):
         self.node_type = node_type.upper()
         self.relation_name = relation_name
         self.schema = schema
@@ -53,6 +54,7 @@ class Node(object):
         self.cost = cost
         self.sort_type = sort_type
         self.children = []
+        self.output = output
 
 
 def get_query_plan(query_number, disable_parameters=(), ):
@@ -64,7 +66,7 @@ def get_query_plan(query_number, disable_parameters=(), ):
         params = config()
 
         # connect to the PostgreSQL server
-        print('Connecting to the PostgreSQL database...')
+        # print('Connecting to the PostgreSQL database...')
         conn = psycopg2.connect(**params)
 
         # create a cursor
@@ -78,18 +80,20 @@ def get_query_plan(query_number, disable_parameters=(), ):
 
         for param in disable_parameters:
             query = "SET LOCAL enable_" + str(param) + "= off;" + query
-        print(query)
+        query = "set session statement_timeout=5000;" + query
+        # print(query)
         cur.execute(query)
         rows = cur.fetchall()
+
+
         output_json = json.dumps(rows)
         cur.close()
     except (Exception, psycopg2.DatabaseError) as error:
-        print(error)
+        if "timeout" in str(error):
+            return {}
     finally:
         if conn is not None:
             conn.close()
-            print('Database connection closed.')
-            print()
 
     return output_json
 
@@ -106,9 +110,9 @@ def get_operations(query_number):
     # format query
     statements = sqlparse.split(query)
     formatted_query = sqlparse.format(statements[0], reindent=True, keyword_case='upper')
-    print()
-    print(formatted_query)
-    print()
+    # print()
+    # print(formatted_query)
+    # print()
 
     # split query
     split_query = formatted_query.splitlines()
@@ -116,7 +120,7 @@ def get_operations(query_number):
     #  get indexes of formatted query
     index = 0
     for line in split_query:
-        print(index, line)
+        # print(index, line)
         index += 1
 
     # GET required indexes of the lines that contain the Relations to retrieve
@@ -132,8 +136,8 @@ def get_operations(query_number):
                     break
             from_indexes_stop.append(from_index + count)
 
-    print("From Start Indexes: " + str(from_indexes_start))
-    print("From Stop Indexes: " + str(from_indexes_stop))
+    # print("From Start Indexes: " + str(from_indexes_start))
+    # print("From Stop Indexes: " + str(from_indexes_stop))
 
     # Link the SCAN Nodes to QEP using the "FROM" indexes
     if len(from_indexes_start) != len(from_indexes_stop):
@@ -164,8 +168,8 @@ def get_operations(query_number):
                     break
             where_indexes_end.append(where_index + count)
 
-    print("Where Start Indexes: " + str(where_indexes_start))
-    print("Where Stop Indexes: " + str(where_indexes_end))
+    # print("Where Start Indexes: " + str(where_indexes_start))
+    # print("Where Stop Indexes: " + str(where_indexes_end))
 
     # Getting lines that have "=" in the WHERE clause
     lines_that_have_equalsign = []
@@ -187,7 +191,7 @@ def get_operations(query_number):
         split_this_line = this_line.split('=')
         if "\'" not in split_this_line[1] and "\"" not in split_this_line[1] and (not split_this_line[1].isnumeric()):
             join_indexes.append(lines_that_have_equalsign[i])
-    print("Join Indexes: " + str(join_indexes))
+    # print("Join Indexes: " + str(join_indexes))
 
     join_conditions_list = []
 
@@ -210,13 +214,10 @@ def get_operations(query_number):
 
     print()
     getJoinMapping(join_conditions_list, join_indexes, split_query, operation_list)
-    for i in operation_list:
-        print(operation_list[operation_list.index(i)])
-
     return operation_list
 
 
-def get_mapping_hashjoin(node, join_conditions_list, join_indexes, split_query, operation_list):
+def get_mapping_hashjoin(i, join_conditions_list, join_indexes, split_query, operation_list):
     count_con = 0
 
     # TODO Check if there is A=B, B=C, A=C relation
@@ -229,35 +230,62 @@ def get_mapping_hashjoin(node, join_conditions_list, join_indexes, split_query, 
     #     if join_conditions_list[0][0] == join_conditions_list[i][0]  or join_conditions_list[0][0] == join_conditions_list[i][2]
 
     for join_condition in join_conditions_list:
-        if (join_condition[0] in node.hash_condition) and (
-                join_condition[1] in node.hash_condition):
+        if (join_condition[0] in rawNodeList[i].hash_condition) and (
+                join_condition[1] in rawNodeList[i].hash_condition):
+            hash_positions = []
+            for j in range(i, 0, -1):
+                if rawNodeList[j].node_type == 'HASH' and (
+                        join_condition[0] in str(rawNodeList[j].output) or join_condition[1] in str(
+                    rawNodeList[j].output)):
+                    hash_positions.append(j)
+                    break
+
+            list_nodes = []
+            for hash_pos in hash_positions:
+                list_nodes.append(rawNodeList[hash_pos])
+            list_nodes.append(rawNodeList[i])
             query_scan = {"index": join_indexes[count_con], "sql": split_query[join_indexes[count_con]],
-                          "operation": "HASH JOIN", "nodes": [node]}
+                          "operation": "HASH JOIN", "nodes": list_nodes}
             operation_list.append(query_scan)
         count_con += 1
 
 
-def get_mapping_mergejoin(node, join_conditions_list, join_indexes, split_query, operation_list):
+def get_mapping_mergejoin(i, join_conditions_list, join_indexes, split_query, operation_list):
     count_con = 0
+
     for join_condition in join_conditions_list:
-        if (join_condition[0] in node.merge_condition) and (
-                join_condition[1] in node.merge_condition):
+        if (join_condition[0] in rawNodeList[i].merge_condition) and (
+                join_condition[1] in rawNodeList[i].merge_condition):
+
+            sort_positions = []
+            for j in range(i, 0, -1):
+                if rawNodeList[j].node_type == 'SORT':
+                    if join_condition[0] in str(rawNodeList[j].sort_key) or join_condition[1] in str(
+                            rawNodeList[j].sort_key):
+                        sort_positions.append(j)
+
+            list_nodes = []
+            for sort_pos in sort_positions:
+                list_nodes.append(rawNodeList[sort_pos])
+            list_nodes.append(rawNodeList[i])
+
             query_scan = {"index": join_indexes[count_con], "sql": split_query[join_indexes[count_con]],
-                          "operation": "MERGE JOIN", "nodes": [node]}
+                          "operation": "MERGE JOIN", "nodes": list_nodes}
             operation_list.append(query_scan)
             break
         count_con += 1
 
 
 def get_mapping_nestloop(i, join_conditions_list, join_indexes, split_query, operation_list):
+
     index_scan_position = -1
 
     for j in range(i, 0, -1):
-        if rawNodeList[j].node_type == 'INDEX SCAN':
+        if rawNodeList[j].node_type == 'INDEX SCAN' or rawNodeList[j].node_type == 'BITMAP INDEX SCAN':
             index_scan_position = j
             break
 
-    if rawNodeList[i].merge_condition is None:
+    if rawNodeList[i].join_filter is None:
         if index_scan_position != -1:
             count_con = 0
             for join_condition in join_conditions_list:
@@ -289,10 +317,10 @@ def get_mapping_nestloop(i, join_conditions_list, join_indexes, split_query, ope
     else:
         count_con = 0
         for join_condition in join_conditions_list:
-            if (join_condition[0] in rawNodeList[i].merge_condition) and (
-                    join_condition[1] in rawNodeList[i].merge_condition):
+            if (join_condition[0] in rawNodeList[i].join_filter) and (
+                    join_condition[1] in rawNodeList[i].join_filter):
                 query_scan = {"index": join_indexes[count_con], "sql": split_query[join_indexes[count_con]],
-                              "operation": "MERGE JOIN", "nodes": [rawNodeList[i]]}
+                              "operation": "NESTED LOOP JOIN", "nodes": [rawNodeList[i]]}
                 operation_list.append(query_scan)
                 break
             count_con += 1
@@ -303,20 +331,20 @@ def getJoinMapping(join_conditions_list, join_indexes, split_query, operation_li
         if "JOIN" in rawNodeList[i].node_type or "NEST" in rawNodeList[i].node_type:
 
             if rawNodeList[i].node_type == "HASH JOIN":
-                get_mapping_hashjoin(rawNodeList[i], join_conditions_list, join_indexes, split_query, operation_list)
+                get_mapping_hashjoin(i, join_conditions_list, join_indexes, split_query, operation_list)
 
 
             elif rawNodeList[i].node_type == "MERGE JOIN":
-                get_mapping_mergejoin(rawNodeList[i], join_conditions_list, join_indexes, split_query, operation_list)
+                get_mapping_mergejoin(i, join_conditions_list, join_indexes, split_query, operation_list)
 
 
             elif rawNodeList[i].node_type == "NESTED LOOP":
                 get_mapping_nestloop(i, join_conditions_list, join_indexes, split_query, operation_list)
 
-def generateAQPs(query_number):
 
+def generateAQPs(query_number):
     aqps = []
-    #count is the number of kinds of join
+    # count is the number of kinds of join
     count = 6
     permutations = list(itertools.product(["ON", "OFF"], repeat=count))
     max = 10
@@ -351,13 +379,19 @@ def generateAQPs(query_number):
 def get_scans(index, sql):
     count = 0
     for node in nodeListScans:
-        if node.relation_name in sql:
-            if node.node_type == "INDEX SCAN":
+        if node.node_type == 'BITMAP INDEX SCAN':
+            relation_name = node.index_name.split('_')[0]
+        else:
+            relation_name = node.relation_name
+
+
+        if relation_name in sql:
+            if node.node_type == "INDEX SCAN" or node.node_type == "BITMAP INDEX SCAN":
                 index_scan_value = count
             else:
                 index_scan_value = -1
             query_scan = {"index": index, "sql": sql, "operation": node.node_type,
-                          "relation": node.relation_name}
+                          "relation": relation_name}
             return query_scan, index_scan_value
         count += 1
 
@@ -416,11 +450,13 @@ def get_qep_tree(qep_json):
             cost = current_plan['Total Cost']
         if 'Sort Space Type' in current_plan:
             sort_type = current_plan['Sort Space Type']
+        if 'Output' in current_plan:
+            output = current_plan['Output']
 
         current_node = Node(current_plan['Node Type'], relation_name, schema, alias, group_key, sort_key, join_type,
                             index_name, hash_condition, table_filter, index_condition, merge_condition,
                             recheck_condition, join_filter,
-                            subplan_name, actual_rows, actual_time, description, cost, sort_type)
+                            subplan_name, actual_rows, actual_time, description, cost, sort_type, output)
 
         if parent_node is not None:
             parent_node.children.append(current_node)
@@ -465,14 +501,17 @@ def get_qep_nodes_with_depth(query_number, disable=()):
     global nodeListScans
     global rawNodeList
     global nodeListJoins
-    qep_json = json.loads(get_query_plan(query_number, disable))
+    raw_json = get_query_plan(query_number, disable)
+    if raw_json == {}:
+        return None
+    qep_json = json.loads(raw_json)
     nodeListOperations.clear()
     nodeListScans.clear()
     root_node = get_qep_tree(qep_json)
     traverse_tree(root_node, 0)
 
 
-def get_qep_nodes(query_number, disable=()):
+def get_mapping(query_number, disable=()):
     global nodeListOperations
     global nodeListScans
     global rawNodeList
@@ -483,5 +522,8 @@ def get_qep_nodes(query_number, disable=()):
     nodeListJoins = []
     get_qep_nodes_with_depth(query_number, disable)
     sorted_scan = dict(sorted(nodeListScans.items(), key=lambda item: item[1], reverse=True))
-    get_operations(query_number)
-    return sorted_scan.keys(), nodeListJoins
+    print(nodeListScans)
+    if rawNodeList:
+        operation_list = get_operations(query_number)
+        return operation_list
+    return None
