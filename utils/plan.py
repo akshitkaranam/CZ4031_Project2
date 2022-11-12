@@ -5,6 +5,7 @@ import json
 from utils.config import config
 import utils.queries as queries
 import sqlparse
+import re
 
 nodeListOperations = []
 nodeListScans = {}
@@ -149,7 +150,6 @@ def get_operations(query_number):
             operation_list.append(query_scan)
             count += 1
 
-
     # GET required indexes of the lines that are contained in the WHERE Clause
     where_indexes_start = [i for i, line in enumerate(split_query) if 'WHERE' in line]
     where_indexes_end = []
@@ -189,88 +189,129 @@ def get_operations(query_number):
             join_indexes.append(lines_that_have_equalsign[i])
     print("Join Indexes: " + str(join_indexes))
 
-
-    # TODO: get type of join operation for each index - needs to be worked on
-    print("reached here")
-
     join_conditions_list = []
 
     for index in join_indexes:
         join_condition = split_query[index].split(" ")
-        if ("WHERE" in join_condition):
-            del join_condition[0:1]
-        elif ("AND" in join_condition) or ("OR" in join_condition[index]):
-            del join_condition[0:3]
-        join_conditions_list.append(join_condition)
+        index_equal_sign = -1
+        for i in range(len(join_condition)):
+            if join_condition[i] == "=":
+                index_equal_sign = i
+                break
+        if index_equal_sign == -1:
+            Exception("Error")
 
-    for i in range(len(rawNodeList)):
-        if "JOIN" in rawNodeList[i].node_type or "NEST" in rawNodeList[i].node_type:
-            if rawNodeList[i].node_type == "HASH JOIN":
-                for join_condition in join_conditions_list:
-                    count_con = 0
-                    if (join_condition[0] in rawNodeList[i].hash_condition) and (join_condition[2] in rawNodeList[i].hash_condition):
-                        query_scan = {"index": join_indexes[count_con], "sql": split_query[index], "operation": "HASH JOIN"}
-                        operation_list.append(query_scan)
-                        break
-                    count_con += 1
+        right = join_condition[index_equal_sign - 1]
+        left = join_condition[index_equal_sign + 1]
+        right = re.sub(r'[()]', '', right)
+        left = re.sub(r'[()]', '', left)
+        temp_list = [right, left]
+        join_conditions_list.append(temp_list)
 
-
-            elif rawNodeList[i].node_type == "MERGE JOIN":
-                for join_condition in join_conditions_list:
-                    count_con = 0
-                    if (join_condition[0] in rawNodeList[i].merge_condition) and (
-                            join_condition[2] in rawNodeList[i].merge_condition):
-                        query_scan = {"index": join_indexes[count_con], "sql": split_query[index], "operation": "MERGE JOIN"}
-                        operation_list.append(query_scan)
-                        break
-                    count_con += 1
-
-
-            elif rawNodeList[i].node_type == "NESTED LOOP":
-                if rawNodeList[i].merge_condition is None and rawNodeList[i - 1].node_type == "SEQ SCAN":
-                    for join_condition in join_conditions_list:
-                        count_con = 0
-                        if (join_condition[0] in rawNodeList[i-1].index_condtion) and (
-                            join_condition[2] in rawNodeList[i-1].index_condtion):
-                            query_scan = {"index": join_indexes[count_con], "sql": split_query[index],
-                                            "operation": "INDEX JOIN"}
-                            operation_list.append(query_scan)
-                            break
-                        count_con += 1
-
-
-                elif rawNodeList[i].merge_condition is not None and rawNodeList[i-1].node_type == "SEQ SCAN":
-                    for join_condition in join_conditions_list:
-                        count_con = 0
-                        if (join_condition[0] in rawNodeList[i - 1].index_condtion) and (
-                                join_condition[2] in rawNodeList[i - 1].index_condtion):
-                            query_scan = {"index": join_indexes[count_con], "sql": split_query[index],
-                                          "operation": "INDEX JOIN"}
-                            operation_list.append(query_scan)
-
-                        if (join_condition[0] in rawNodeList[i].join_filter) and (
-                                join_condition[2] in rawNodeList[i].join_filter):
-                            query_scan = {"index": join_indexes[count_con], "sql": split_query[index],
-                                          "operation": "NESTED LOOP JOIN"}
-                            operation_list.append(query_scan)
-                        count_con += 1
-
-                else:
-                    print("Work in progress")
-                    # for join_condition in join_conditions_list:
-                    #     count_con = 0
-                    #     if (join_condition[0] in rawNodeList[i].join_filter) and (
-                    #             join_condition[2] in rawNodeList[i].join_filter):
-                    #         query_scan = {"index": join_indexes[count_con], "sql": split_query[index],
-                    #                       "operation": "NESTED LOOP JOIN"}
-                    #         operation_list.append(query_scan)
-                    #         break
-                    #     count_con += 1
     print()
+    getJoinMapping(join_conditions_list, join_indexes, split_query, operation_list)
     for i in operation_list:
         print(operation_list[operation_list.index(i)])
 
     return operation_list
+
+
+def get_mapping_hashjoin(node, join_conditions_list, join_indexes, split_query, operation_list):
+    count_con = 0
+
+    # TODO Check if there is A=B, B=C, A=C relation
+    # Check if there is A=B, B=C, A=C relation
+    weird_relation = []
+
+    # for i in range(len(join_conditions_list)):
+    #     if i==0:
+    #         continue
+    #     if join_conditions_list[0][0] == join_conditions_list[i][0]  or join_conditions_list[0][0] == join_conditions_list[i][2]
+
+    for join_condition in join_conditions_list:
+        if (join_condition[0] in node.hash_condition) and (
+                join_condition[1] in node.hash_condition):
+            query_scan = {"index": join_indexes[count_con], "sql": split_query[join_indexes[count_con]],
+                          "operation": "HASH JOIN", "nodes": [node]}
+            operation_list.append(query_scan)
+        count_con += 1
+
+
+def get_mapping_mergejoin(node, join_conditions_list, join_indexes, split_query, operation_list):
+    count_con = 0
+    for join_condition in join_conditions_list:
+        if (join_condition[0] in node.merge_condition) and (
+                join_condition[1] in node.merge_condition):
+            query_scan = {"index": join_indexes[count_con], "sql": split_query[join_indexes[count_con]],
+                          "operation": "MERGE JOIN", "nodes": [node]}
+            operation_list.append(query_scan)
+            break
+        count_con += 1
+
+
+def get_mapping_nestloop(i, join_conditions_list, join_indexes, split_query, operation_list):
+    index_scan_position = -1
+
+    for j in range(i, 0, -1):
+        if rawNodeList[j].node_type == 'INDEX SCAN':
+            index_scan_position = j
+            break
+
+    if rawNodeList[i].merge_condition is None:
+        if index_scan_position != -1:
+            count_con = 0
+            for join_condition in join_conditions_list:
+                if (join_condition[0] in rawNodeList[index_scan_position].index_condition) and (
+                        join_condition[1] in rawNodeList[index_scan_position].index_condition):
+                    query_scan = {"index": join_indexes[count_con], "sql": split_query[join_indexes[count_con]],
+                                  "operation": "INDEX JOIN",
+                                  "nodes": [rawNodeList[i], rawNodeList[index_scan_position]]}
+                    operation_list.append(query_scan)
+                    break
+                count_con += 1
+
+    elif index_scan_position != -1 and (i - index_scan_position < 3):
+        count_con = 0
+        for join_condition in join_conditions_list:
+            if (join_condition[0] in rawNodeList[index_scan_position].index_condition) and (
+                    join_condition[1] in rawNodeList[index_scan_position].index_condition):
+                query_scan = {"index": join_indexes[count_con], "sql": split_query[join_indexes[count_con]],
+                              "operation": "INDEX JOIN", "nodes": [rawNodeList[i], rawNodeList[index_scan_position]]}
+                operation_list.append(query_scan)
+
+            if (join_condition[0] in rawNodeList[i].join_filter) and (
+                    join_condition[1] in rawNodeList[i].join_filter):
+                query_scan = {"index": join_indexes[count_con], "sql": split_query[join_indexes[count_con]],
+                              "operation": "NESTED LOOP JOIN", "nodes": [rawNodeList[i]]}
+                operation_list.append(query_scan)
+            count_con += 1
+
+    else:
+        count_con = 0
+        for join_condition in join_conditions_list:
+            if (join_condition[0] in rawNodeList[i].merge_condition) and (
+                    join_condition[1] in rawNodeList[i].merge_condition):
+                query_scan = {"index": join_indexes[count_con], "sql": split_query[join_indexes[count_con]],
+                              "operation": "MERGE JOIN", "nodes": [rawNodeList[i]]}
+                operation_list.append(query_scan)
+                break
+            count_con += 1
+
+
+def getJoinMapping(join_conditions_list, join_indexes, split_query, operation_list):
+    for i in range(len(rawNodeList)):
+        if "JOIN" in rawNodeList[i].node_type or "NEST" in rawNodeList[i].node_type:
+
+            if rawNodeList[i].node_type == "HASH JOIN":
+                get_mapping_hashjoin(rawNodeList[i], join_conditions_list, join_indexes, split_query, operation_list)
+
+
+            elif rawNodeList[i].node_type == "MERGE JOIN":
+                get_mapping_mergejoin(rawNodeList[i], join_conditions_list, join_indexes, split_query, operation_list)
+
+
+            elif rawNodeList[i].node_type == "NESTED LOOP":
+                get_mapping_nestloop(i, join_conditions_list, join_indexes, split_query, operation_list)
 
 def generateAQPs(query_number):
 
@@ -409,9 +450,9 @@ def traverse_tree(node, depth):
         nodeListScans.update({node: depth})
 
     elif "LOOP" in str(node.node_type) \
-            or "JOIN" in str(node.node_type): #\
-            # or str(node.node_type) == "HASH" \
-            # or (str(node.node_type) == "SORT" and str(node.sort_type) == "Disk"):
+            or "JOIN" in str(node.node_type):  # \
+        # or str(node.node_type) == "HASH" \
+        # or (str(node.node_type) == "SORT" and str(node.sort_type) == "Disk"):
         nodeListJoins.append(node)
     else:
         nodeListOperations.append(node)
