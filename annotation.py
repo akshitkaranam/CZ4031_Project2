@@ -25,30 +25,29 @@ def get_all_plans(query_number, disable_methods=()):
         print(index, line)
         index += 1
 
-
     optimal = get_mapping(query_number)
 
     # For the various joins
     print("Getting Nested Loop")
-    disable = tuple(["hashjoin","mergejoin","indexscan","bitmapscan"])
-    nestedloop = get_mapping(query_number,disable)
+    disable = tuple(["hashjoin", "mergejoin", "indexscan", "bitmapscan"])
+    nestedloop = get_mapping(query_number, disable)
 
     print("Getting Hash Join")
     disable = tuple(["nestloop", "mergejoin", "indexscan", "bitmapscan"])
-    hashjoin = get_mapping(query_number,disable)
+    hashjoin = get_mapping(query_number, disable)
 
     print("Getting Merge Join")
     disable = tuple(["nestloop", "hashjoin", "indexscan", "bitmapscan"])
-    mergejoin = get_mapping(query_number,disable)
+    mergejoin = get_mapping(query_number, disable)
 
     print("Getting Index Join")
     disable = tuple(["nestloop", "mergejoin", "hashjoin"])
-    indexjoin = get_mapping(query_number,disable)
+    indexjoin = get_mapping(query_number, disable)
 
     # For the various scans
     print("Getting Seq Scan")
     disable = tuple(["indexscan", "bitmapscan"])
-    seqscan = get_mapping(query_number,disable)
+    seqscan = get_mapping(query_number, disable)
 
     print("Getting Index Scan")
     disable = tuple(["seqscan", "bitmapscan"])
@@ -56,53 +55,42 @@ def get_all_plans(query_number, disable_methods=()):
 
     print("Getting Bitmap Scan")
     disable = tuple(["indexscan", "seqscan"])
-    bitmapscan = get_mapping(query_number,disable)
+    bitmapscan = get_mapping(query_number, disable)
 
+    optimal_dict = {}
     if optimal:
         for line_index in optimal:
-            print(line_index)
-
-
-
-
-
-
-
-
-
-def generateAQPs(query_number):
-
-    aqps = []
-    #count is the number of kinds of join
-    count = 6
-    permutations = list(itertools.product(["ON", "OFF"], repeat=count))
-    max = 10
-    cur = 0
-    for p in permutations:
-        cur += 1
-        i = 0
-        alt_params = PARAMS.copy()
-        for key, value in alt_params.items():
-            if value == "ON":
-                alt_params.update({key: p[i]})
-                i += 1
-            if i == count:
-                break
-        disable = []
-
-        for key, value in alt_params.items():
-            if value == "OFF":
-                disable.append(key)
-        new_disable = tuple(disable)
-        temp = json.dumps(get_query_plan(query_number, new_disable))
-        aqp_json = json.loads(temp)
-        if aqp_json:
-            aqps.append(aqp_json)
-            print(aqp_json)
-            if (cur > max):
-                break
-    return aqps
+            index = line_index["index"]
+            operation = line_index['operation']
+            nodes = line_index["nodes"]
+            total_cost = 0
+            for node in nodes:
+                total_cost += node.cost
+            print(index, operation, total_cost)
+    print()
+    print()
+    if hashjoin:
+        for line_index in hashjoin:
+            index = line_index["index"]
+            operation = line_index["operation"]
+            nodes = line_index["nodes"]
+            total_cost = 0
+            for node in nodes:
+                total_cost += node.cost
+            print(index,operation,total_cost)
+    print()
+    print()
+    if mergejoin:
+        for line_index in mergejoin:
+            index = line_index["index"]
+            operation = line_index["operation"]
+            nodes = line_index["nodes"]
+            total_cost = 0
+            for node in nodes:
+                total_cost += node.cost
+            print(index,operation,total_cost)
+    print()
+    print()
 
 if __name__ == '__main__':
-    mapping = get_all_plans(14)
-
+    mapping = get_all_plans(5)

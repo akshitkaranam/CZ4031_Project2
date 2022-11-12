@@ -85,7 +85,6 @@ def get_query_plan(query_number, disable_parameters=(), ):
         cur.execute(query)
         rows = cur.fetchall()
 
-
         output_json = json.dumps(rows)
         cur.close()
     except (Exception, psycopg2.DatabaseError) as error:
@@ -101,7 +100,6 @@ def get_query_plan(query_number, disable_parameters=(), ):
 def get_operations(query_number):
     sql_operators_main = ["SELECT", "FROM", "WHERE", 'GROUP BY', 'ORDER', 'JOIN']
     operation_list = []
-    index_scan_values = []
     query = queries.getQuery(query_number)
 
     # for nodes in rawNodeList:
@@ -148,9 +146,7 @@ def get_operations(query_number):
         from_end = from_indexes_stop[i]
         count = 0
         for line in split_query[from_start:from_end + 1]:
-            query_scan, index_scan = get_scans(from_start + count, line)
-            if index_scan != -1:
-                index_scan_values.append(index_scan)
+            query_scan = get_scans(from_start + count, line)
             operation_list.append(query_scan)
             count += 1
 
@@ -213,23 +209,33 @@ def get_operations(query_number):
         join_conditions_list.append(temp_list)
 
     print()
+
+    # # Check if there is A=B, B=C, A=C relation, weird relation
+    # for i in range(len(join_conditions_list)):
+    #     for j in range(i + 1, len(join_conditions_list)):
+    #         join_condition_i = join_conditions_list[i]
+    #         join_condition_j = join_conditions_list[j]
+    #         combined_list = join_condition_i + join_condition_j
+    #         combined_list2 = list(set(combined_list))
+    #         if (len(combined_list2) < 4):
+    #             common_condition = list(set(combined_list) - set(combined_list2))
+    #             join_condition_i_new = list(set(join_condition_i) - set(common_condition))
+    #             join_condition_j_new = list(set(join_condition_j) - set(common_condition))
+    #             join_condition_i_new.append(join_condition_j_new[0])
+    #             join_condition_j_new.append(join_condition_i_new[0])
+    #             join_conditions_list.append({i: join_condition_i})
+    #             join_conditions_list.append({j: join_condition_j})
+    #             continue
+
     getJoinMapping(join_conditions_list, join_indexes, split_query, operation_list)
-    return operation_list, formatted_query
+    return operation_list
 
 
 def get_mapping_hashjoin(i, join_conditions_list, join_indexes, split_query, operation_list):
     count_con = 0
 
-    # TODO Check if there is A=B, B=C, A=C relation
-    # Check if there is A=B, B=C, A=C relation
-    weird_relation = []
-
-    # for i in range(len(join_conditions_list)):
-    #     if i==0:
-    #         continue
-    #     if join_conditions_list[0][0] == join_conditions_list[i][0]  or join_conditions_list[0][0] == join_conditions_list[i][2]
-
     for join_condition in join_conditions_list:
+
         if (join_condition[0] in rawNodeList[i].hash_condition) and (
                 join_condition[1] in rawNodeList[i].hash_condition):
             hash_positions = []
@@ -277,7 +283,6 @@ def get_mapping_mergejoin(i, join_conditions_list, join_indexes, split_query, op
 
 
 def get_mapping_nestloop(i, join_conditions_list, join_indexes, split_query, operation_list):
-
     index_scan_position = -1
 
     for j in range(i, 0, -1):
@@ -342,58 +347,19 @@ def getJoinMapping(join_conditions_list, join_indexes, split_query, operation_li
                 get_mapping_nestloop(i, join_conditions_list, join_indexes, split_query, operation_list)
 
 
-def generateAQPs(query_number):
-    aqps = []
-    # count is the number of kinds of join
-    count = 6
-    permutations = list(itertools.product(["ON", "OFF"], repeat=count))
-    max = 10
-    cur = 0
-    for p in permutations:
-        cur += 1
-        i = 0
-        alt_params = PARAMS.copy()
-        for key, value in alt_params.items():
-            if value == "ON":
-                alt_params.update({key: p[i]})
-                i += 1
-            if i == count:
-                break
-        disable = []
-
-        for key, value in alt_params.items():
-            if value == "OFF":
-                disable.append(key)
-        new_disable = tuple(disable)
-        temp = json.dumps(get_query_plan(query_number, new_disable))
-        aqp_json = json.loads(temp)
-        if aqp_json:
-            aqps.append(aqp_json)
-            print(aqp_json)
-            if (cur > max):
-                break
-    return aqps
-
-
 # get type of scan operation for each index
 def get_scans(index, sql):
-    count = 0
     for node in nodeListScans:
         if node.node_type == 'BITMAP INDEX SCAN':
             relation_name = node.index_name.split('_')[0]
         else:
             relation_name = node.relation_name
 
-
         if relation_name in sql:
-            if node.node_type == "INDEX SCAN" or node.node_type == "BITMAP INDEX SCAN":
-                index_scan_value = count
-            else:
-                index_scan_value = -1
             query_scan = {"index": index, "sql": sql, "operation": node.node_type,
-                          "relation": relation_name}
-            return query_scan, index_scan_value
-        count += 1
+                          "relation": relation_name, "nodes": [node]}
+
+            return query_scan
 
 
 def get_qep_tree(qep_json):
