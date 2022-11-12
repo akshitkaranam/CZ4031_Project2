@@ -85,7 +85,13 @@ def get_query_plan(query_number, disable_parameters=(), ):
 
 
 def get_operations(query_number):
+    sql_operators_main = ["SELECT", "FROM", "WHERE", 'GROUP BY', 'ORDER', 'JOIN']
+    operation_list = []
+    index_scan_values = []
     query = queries.getQuery(query_number)
+
+    # for nodes in rawNodeList:
+    #     print(nodes)
 
     # format query
     statements = sqlparse.split(query)
@@ -96,77 +102,161 @@ def get_operations(query_number):
 
     # split query
     split_query = formatted_query.splitlines()
-    # print(split_query)
 
-    #  get indexes of scans
+    #  get indexes of formatted query
     index = 0
     for line in split_query:
         print(index, line)
         index += 1
 
-    from_index = [i for i, line in enumerate(split_query) if 'FROM' in line]
-    # print("list of starting index of from:", from_index)
+    # GET required indexes of the lines that contain the Relations to retrieve
+    from_indexes_start = [i for i, line in enumerate(split_query) if 'FROM' in line]
+    from_indexes_stop = []
+    if from_indexes_start:
+        for from_index in from_indexes_start:
+            count = 0
+            for line in split_query[from_index + 1:]:
+                if not any(ext in line for ext in sql_operators_main):
+                    count += 1
+                else:
+                    break
+            from_indexes_stop.append(from_index + count)
 
-    where_index = [i for i, line in enumerate(split_query) if 'WHERE' in line]
-    # print("list of starting index of where:", where_index)
+    print("From Start Indexes: " + str(from_indexes_start))
+    print("From Stop Indexes: " + str(from_indexes_stop))
 
-    operation_list = []
-    if len(from_index) > 1:
+    # Link the SCAN Nodes to QEP using the "FROM" indexes
+    if len(from_indexes_start) != len(from_indexes_stop):
+        return Exception("There is an error in the SQL query")
+
+    for i in range(len(from_indexes_start)):
+        from_start = from_indexes_start[i]
+        from_end = from_indexes_stop[i]
         count = 0
-        for i in from_index:
-            if count < len(from_index):
-                for index in range(from_index[count], where_index[count]):
-                    query_scan = get_scans(index, split_query[index])
-                    operation_list.append(query_scan)
-                count += 1
-    else:
-        for index in range(from_index[0], where_index[0]):
-            query_scan = get_scans(index, split_query[index])
+        for line in split_query[from_start:from_end + 1]:
+            query_scan, index_scan = get_scans(from_start + count, line)
+            if index_scan != -1:
+                index_scan_values.append(index_scan)
             operation_list.append(query_scan)
+            count += 1
 
-    # assumes keyword "key" is used for all join operations -- based on queries
-    join_index = [i for i, line in enumerate(split_query) if 'key' in line]
-    # print("list of possible index for join:", join_index)
+
+    # GET required indexes of the lines that are contained in the WHERE Clause
+    where_indexes_start = [i for i, line in enumerate(split_query) if 'WHERE' in line]
+    where_indexes_end = []
+    if where_indexes_start:
+        for where_index in where_indexes_start:
+            count = 0
+            for line in split_query[where_index + 1:]:
+                if not any(ext in line for ext in sql_operators_main):
+
+                    count += 1
+                else:
+                    break
+            where_indexes_end.append(where_index + count)
+
+    print("Where Start Indexes: " + str(where_indexes_start))
+    print("Where Stop Indexes: " + str(where_indexes_end))
+
+    # Getting lines that have "=" in the WHERE clause
+    lines_that_have_equalsign = []
+    if len(where_indexes_start) != len(where_indexes_end):
+        return Exception("There is an error in the SQL query")
+
+    for i in range(len(where_indexes_start)):
+        where_start = where_indexes_start[i]
+        where_end = where_indexes_end[i]
+        count = 0
+        for line in split_query[where_start:where_end + 1]:
+            if (">" not in line) and ("=" in line) and ("<" not in line):
+                lines_that_have_equalsign.append(where_start + count)
+            count += 1
+    join_indexes = []
+    for i in range(len(lines_that_have_equalsign)):
+        this_line = split_query[lines_that_have_equalsign[i]]
+        # print(this_line)
+        split_this_line = this_line.split('=')
+        if "\'" not in split_this_line[1] and "\"" not in split_this_line[1] and (not split_this_line[1].isnumeric()):
+            join_indexes.append(lines_that_have_equalsign[i])
+    print("Join Indexes: " + str(join_indexes))
+
 
     # TODO: get type of join operation for each index - needs to be worked on
-    for index in join_index:
-        if ("WHERE" in split_query[index]) or ("AND" in split_query[index]) or ("OR" in split_query[index]):
-            each_word = split_query[index].split(" ")
-            if ("WHERE" in each_word):
-                del each_word[0:1]
-            elif ("AND" in each_word) or ("OR" in split_query[index]):
-                del each_word[0:3]
+    print("reached here")
 
-            for node in nodeListJoins:
-                for z in each_word:
-                    if z in str(node.hash_condition):
-                        hash_join = True
-                    else:
-                        hash_join = False
-                    # print(hash_join, z, node.hash_condition)
-                    if z in str(node.merge_condition):
-                        merge_join = True
-                    else:
-                        merge_join = False
-                    # print(merge_join, z, node.merge_condition)
-                    if z in str(node.join_filter):
-                        nested_loop = True
-                    else:
-                        nested_loop = False
-                    # print(nested_loop, z, node.join_filter)
-                if hash_join:
-                    # print(index, split_query[index], "HASH JOIN")
-                    query_scan = {"index": index, "sql": split_query[index], "operation": "HASH JOIN"}
-                    operation_list.append(query_scan)
-                elif merge_join:
-                    # print(index, split_query[index], "MERGE JOIN")
-                    query_scan = {"index": index, "sql": split_query[index], "operation": "MERGE JOIN"}
-                    operation_list.append(query_scan)
-                elif nested_loop:
-                    # print(index, split_query[index], "NESTED LOOP")
-                    query_scan = {"index": index, "sql": split_query[index], "operation": "NESTED LOOP"}
-                    operation_list.append(query_scan)
+    join_conditions_list = []
 
+    for index in join_indexes:
+        join_condition = split_query[index].split(" ")
+        if ("WHERE" in join_condition):
+            del join_condition[0:1]
+        elif ("AND" in join_condition) or ("OR" in join_condition[index]):
+            del join_condition[0:3]
+        join_conditions_list.append(join_condition)
+
+    for i in range(len(rawNodeList)):
+        if "JOIN" in rawNodeList[i].node_type or "NEST" in rawNodeList[i].node_type:
+            if rawNodeList[i].node_type == "HASH JOIN":
+                for join_condition in join_conditions_list:
+                    count_con = 0
+                    if (join_condition[0] in rawNodeList[i].hash_condition) and (join_condition[2] in rawNodeList[i].hash_condition):
+                        query_scan = {"index": join_indexes[count_con], "sql": split_query[index], "operation": "HASH JOIN"}
+                        operation_list.append(query_scan)
+                        break
+                    count_con += 1
+
+
+            elif rawNodeList[i].node_type == "MERGE JOIN":
+                for join_condition in join_conditions_list:
+                    count_con = 0
+                    if (join_condition[0] in rawNodeList[i].merge_condition) and (
+                            join_condition[2] in rawNodeList[i].merge_condition):
+                        query_scan = {"index": join_indexes[count_con], "sql": split_query[index], "operation": "MERGE JOIN"}
+                        operation_list.append(query_scan)
+                        break
+                    count_con += 1
+
+
+            elif rawNodeList[i].node_type == "NESTED LOOP":
+                if rawNodeList[i].merge_condition is None and rawNodeList[i - 1].node_type == "SEQ SCAN":
+                    for join_condition in join_conditions_list:
+                        count_con = 0
+                        if (join_condition[0] in rawNodeList[i-1].index_condtion) and (
+                            join_condition[2] in rawNodeList[i-1].index_condtion):
+                            query_scan = {"index": join_indexes[count_con], "sql": split_query[index],
+                                            "operation": "INDEX JOIN"}
+                            operation_list.append(query_scan)
+                            break
+                        count_con += 1
+
+
+                elif rawNodeList[i].merge_condition is not None and rawNodeList[i-1].node_type == "SEQ SCAN":
+                    for join_condition in join_conditions_list:
+                        count_con = 0
+                        if (join_condition[0] in rawNodeList[i - 1].index_condtion) and (
+                                join_condition[2] in rawNodeList[i - 1].index_condtion):
+                            query_scan = {"index": join_indexes[count_con], "sql": split_query[index],
+                                          "operation": "INDEX JOIN"}
+                            operation_list.append(query_scan)
+
+                        if (join_condition[0] in rawNodeList[i].join_filter) and (
+                                join_condition[2] in rawNodeList[i].join_filter):
+                            query_scan = {"index": join_indexes[count_con], "sql": split_query[index],
+                                          "operation": "NESTED LOOP JOIN"}
+                            operation_list.append(query_scan)
+                        count_con += 1
+
+                else:
+                    print("Work in progress")
+                    # for join_condition in join_conditions_list:
+                    #     count_con = 0
+                    #     if (join_condition[0] in rawNodeList[i].join_filter) and (
+                    #             join_condition[2] in rawNodeList[i].join_filter):
+                    #         query_scan = {"index": join_indexes[count_con], "sql": split_query[index],
+                    #                       "operation": "NESTED LOOP JOIN"}
+                    #         operation_list.append(query_scan)
+                    #         break
+                    #     count_con += 1
     print()
     for i in operation_list:
         print(operation_list[operation_list.index(i)])
@@ -176,29 +266,17 @@ def get_operations(query_number):
 
 # get type of scan operation for each index
 def get_scans(index, sql):
-    for relation in sql:
-        if 'region' in sql:
-            relation = 'region'
-        elif 'nation' in sql:
-            relation = 'nation'
-        elif 'part' in sql:
-            relation = 'part'
-        elif 'supplier' in sql:
-            relation = 'supplier'
-        elif 'partsupp' in sql:
-            relation = 'partsupp'
-        elif 'customer' in sql:
-            relation = 'customer'
-        elif 'orders' in sql:
-            relation = 'orders'
-        elif 'lineitem' in sql:
-            relation = 'lineitem'
-
+    count = 0
     for node in nodeListScans:
-        if relation in node.relation_name:
+        if node.relation_name in sql:
+            if node.node_type == "INDEX SCAN":
+                index_scan_value = count
+            else:
+                index_scan_value = -1
             query_scan = {"index": index, "sql": sql, "operation": node.node_type,
                           "relation": node.relation_name}
-            return query_scan
+            return query_scan, index_scan_value
+        count += 1
 
 
 def get_qep_tree(qep_json):
@@ -289,9 +367,9 @@ def traverse_tree(node, depth):
         nodeListScans.update({node: depth})
 
     elif "LOOP" in str(node.node_type) \
-            or "JOIN" in str(node.node_type) \
-            or str(node.node_type) == "HASH" \
-            or (str(node.node_type) == "SORT" and str(node.sort_type) == "Disk"):
+            or "JOIN" in str(node.node_type): #\
+            # or str(node.node_type) == "HASH" \
+            # or (str(node.node_type) == "SORT" and str(node.sort_type) == "Disk"):
         nodeListJoins.append(node)
     else:
         nodeListOperations.append(node)
