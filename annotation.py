@@ -224,4 +224,4 @@ def getAnnotationsJoins(operation, index, operation_function, optimal_dict, nest
 
 
 if __name__ == '__main__':
-    mapping = get_all_plans(19)
+    mapping = get_all_plans(2)
