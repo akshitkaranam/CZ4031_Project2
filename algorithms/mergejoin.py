@@ -1,7 +1,46 @@
+import math
 
-def mergejoin(hashcost, mergecost, nestloopcost):
-    annotation = "This join is implemented using merge join operator as hash join and NL joins \
-        increase the estimated cost by at least " + int(hashcost/mergecost) + " times and " \
-            + int(nestloopcost/mergecost) + " times, respectively"
-    
+
+def mergejoin(optimalcost, hashcost, mergecost, nestloopcost, indexnestloopcost):
+    scale_nested_loop = str("%.2f" % float(nestloopcost / optimalcost))
+    scale_index_nested_loop = str("%.2f" % float(indexnestloopcost / optimalcost))
+    scale_hash = str("%.2f" % float(hashcost / optimalcost))
+    timeoutarray = []
+    notapplicable = []
+
+    annotation = "This join is implemented using NESTED LOOP JOIN, the cost for this operation is:  " + str(
+        "%.2f" % optimalcost)
+
+    if nestloopcost != math.inf:
+        if nestloopcost == -1:
+            notapplicable.append(". NESTED LOOP JOIN IS NOT APPLICABLE")
+        else:
+            annotation += ". NESTED LOOP JOIN would have costed: " + str("%.2f" % nestloopcost) + " which costs " + str(scale_nested_loop) \
+                      + " times more"
+    else:
+        timeoutarray.append(". NESTED LOOP JOIN TIMES OUT!")
+
+    if indexnestloopcost != math.inf:
+        if indexnestloopcost == -1:
+            notapplicable.append(". INDEX NESTED LOOP JOIN IS NOT APPLICABLE")
+        else:
+            annotation += ". INDEX NESTED LOOP JOIN would have costed: " + str("%.2f" % indexnestloopcost) + " which costs " \
+                      + str(scale_index_nested_loop) + " times more"
+    else:
+        timeoutarray.append(". NESTED LOOP JOIN TIMES OUT!")
+
+    if hashcost != math.inf:
+        if hashcost == -1:
+            notapplicable.append(". HASH JOIN IS NOT APPLICABLE")
+        else:
+            annotation += ". HASH JOIN would have costed: " + str("%.2f" % hashcost) \
+                      + " which costs " + str(scale_hash) + " times more"
+    else:
+        timeoutarray.append(". HASH JOIN TIMES OUT!")
+
+    for na in notapplicable:
+        annotation += na
+    for timeout in timeoutarray:
+        annotation += timeout
+
     return annotation

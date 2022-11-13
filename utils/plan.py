@@ -270,6 +270,7 @@ def get_mapping_mergejoin(i, join_conditions_list, join_indexes, split_query, op
                             rawNodeList[j].sort_key):
                         sort_positions.append(j)
 
+
             list_nodes = []
             for sort_pos in sort_positions:
                 list_nodes.append(rawNodeList[sort_pos])
@@ -278,7 +279,7 @@ def get_mapping_mergejoin(i, join_conditions_list, join_indexes, split_query, op
             query_scan = {"index": join_indexes[count_con], "sql": split_query[join_indexes[count_con]],
                           "operation": "MERGE JOIN", "nodes": list_nodes}
             operation_list.append(query_scan)
-            break
+
         count_con += 1
 
 
@@ -300,7 +301,7 @@ def get_mapping_nestloop(i, join_conditions_list, join_indexes, split_query, ope
                                   "operation": "INDEX JOIN",
                                   "nodes": [rawNodeList[i], rawNodeList[index_scan_position]]}
                     operation_list.append(query_scan)
-                    break
+
                 count_con += 1
 
     elif index_scan_position != -1 and (i - index_scan_position < 3):
@@ -327,7 +328,7 @@ def get_mapping_nestloop(i, join_conditions_list, join_indexes, split_query, ope
                 query_scan = {"index": join_indexes[count_con], "sql": split_query[join_indexes[count_con]],
                               "operation": "NESTED LOOP JOIN", "nodes": [rawNodeList[i]]}
                 operation_list.append(query_scan)
-                break
+
             count_con += 1
 
 
