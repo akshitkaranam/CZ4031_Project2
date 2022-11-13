@@ -1,5 +1,7 @@
 import math
 
+from algorithms.bitmapscan import bitmapscan
+from algorithms.indexscan import indexscan
 from utils import queries
 from utils.plan import get_mapping
 import itertools
@@ -10,6 +12,8 @@ from algorithms.mergejoin import mergejoin
 from algorithms.hashjoin import hashjoin
 from algorithms.indexNLjoin import indexNLjoin
 from algorithms.nestedloopjoin import nestedloopjoin
+from algorithms.seqscan import seqscan
+
 
 PARAMS = {
     'hashjoin': 'ON',
@@ -53,18 +57,7 @@ def get_all_plans(query_number):
     disable = tuple(["nestloop", "mergejoin", "hashjoin"])
     indexjoin_list = get_mapping(query_number, disable)
 
-    # # For the various scans
-    # print("Getting Seq Scan")
-    # disable = tuple(["indexscan", "bitmapscan"])
-    # seqscan_list = get_mapping(query_number, disable)
-    #
-    # print("Getting Index Scan")
-    # disable = tuple(["seqscan", "bitmapscan"])
-    # indexscan_list = get_mapping(query_number, disable)
-    #
-    # print("Getting Bitmap Scan")
-    # disable = tuple(["indexscan", "seqscan"])
-    # bitmapscan_list = get_mapping(query_number, disable)
+
 
     optimal_dict = {}
     if optimal:
@@ -73,9 +66,19 @@ def get_all_plans(query_number):
             operation = line_index['operation']
             nodes = line_index["nodes"]
             total_cost = 0
+            index_cond = ""
             for node in nodes:
+                if(node.node_type == "INDEX SCAN"):
+                    index_cond = node.index_condition
+
                 total_cost += node.cost
-            optimal_dict.update({index: [operation, total_cost]})
+            if "SCAN" in operation:
+                if "INDEX SCAN" in operation:
+                    optimal_dict.update({index: [operation, total_cost, line_index['relation'],index_cond]})
+                else:
+                    optimal_dict.update({index: [operation, total_cost,line_index['relation']]})
+            else:
+                optimal_dict.update({index: [operation, total_cost]})
 
     hashjoin_dict = {}
     if hashjoin_list:
@@ -121,43 +124,11 @@ def get_all_plans(query_number):
                 total_cost += node.cost
             mergejoin_dict.update({index: [operation, total_cost]})
 
-    # seqscan_dict = {}
-    # if seqscan_dict:
-    #     for line_index in seqscan_list:
-    #         index = line_index["index"]
-    #         operation = line_index["operation"]
-    #         nodes = line_index["nodes"]
-    #         total_cost = 0
-    #         for node in nodes:
-    #             total_cost += node.cost
-    #         seqscan_dict.update({index: [operation, total_cost]})
-    #
-    # indexscan_dict = {}
-    # if indexscan_list:
-    #     for line_index in indexscan_list:
-    #         index = line_index["index"]
-    #         operation = line_index["operation"]
-    #         nodes = line_index["nodes"]
-    #         total_cost = 0
-    #         for node in nodes:
-    #             total_cost += node.cost
-    #         indexscan_dict.update({index: [operation, total_cost]})
-    #
-    # bitmapscan_dict = {}
-    # if bitmapscan_list:
-    #     for line_index in bitmapscan_list:
-    #         index = line_index["index"]
-    #         operation = line_index["operation"]
-    #         nodes = line_index["nodes"]
-    #         total_cost = 0
-    #         for node in nodes:
-    #             total_cost += node.cost
-    #         bitmapscan_dict.update({index: [operation, total_cost]})
 
     annotations = {}
     for index in optimal_dict.keys():
         if optimal_dict[index][0] == "MERGE JOIN":
-            annotation = getAnnotationsJoins("MERGE JOIN", index, hashjoin, optimal_dict, nestedloop_dict,
+            annotation = getAnnotationsJoins("MERGE JOIN", index, mergejoin, optimal_dict, nestedloop_dict,
                                              indexjoin_dict, hashjoin_dict, mergejoin_dict)
             annotations.update({index: annotation})
         elif optimal_dict[index][0] == "HASH JOIN":
@@ -165,12 +136,24 @@ def get_all_plans(query_number):
                                              indexjoin_dict, hashjoin_dict, mergejoin_dict)
             annotations.update({index: annotation})
         elif optimal_dict[index][0] == "NESTED LOOP":
-            annotation = getAnnotationsJoins("NESTED LOOP", index, hashjoin, optimal_dict, nestedloop_dict,
+            annotation = getAnnotationsJoins("NESTED LOOP", index, nestedloopjoin, optimal_dict, nestedloop_dict,
                                              indexjoin_dict, hashjoin_dict, mergejoin_dict)
             annotations.update({index: annotation})
         elif optimal_dict[index][0] == "INDEX JOIN":
             annotation = getAnnotationsJoins("INDEX JOIN", index, indexNLjoin, optimal_dict, nestedloop_dict,
                                              indexjoin_dict, hashjoin_dict, mergejoin_dict)
+            annotations.update({index: annotation})
+
+        elif optimal_dict[index][0] == "SEQ SCAN":
+            annotation = seqscan(optimal_dict[index][2])
+            annotations.update({index: annotation})
+
+        elif optimal_dict[index][0] == "BITMAP SCAN":
+            annotation = bitmapscan(optimal_dict[index][2])
+            annotations.update({index: annotation})
+
+        elif optimal_dict[index][0] == "INDEX SCAN":
+            annotation = indexscan(relation_name=optimal_dict[index][2],join_condition=optimal_dict[index][3])
             annotations.update({index: annotation})
 
     print(annotations)
@@ -220,8 +203,7 @@ def getAnnotationsJoins(operation, index, operation_function, optimal_dict, nest
     print(annotation)
     return annotation
 
-# def get_scan_annotation():
 
 
 if __name__ == '__main__':
-    mapping = get_all_plans(2)
+    mapping = get_all_plans(5)
